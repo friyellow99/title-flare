@@ -5,10 +5,12 @@ import { ApiKeyForm } from "@/components/ApiKeyForm";
 import { TopicInput } from "@/components/TopicInput";
 import { ArticleList } from "@/components/ArticleList";
 import { RelatedTopics } from "@/components/RelatedTopics";
-import { Article, ArticleTitle, Topic } from "@/types";
+import { GenerationSettings } from "@/components/GenerationSettings";
+import { ApiKeyManager } from "@/components/ApiKeyManager";
+import { Article, Topic } from "@/types";
 import { GeminiService } from "@/lib/gemini";
 import { PexelsService } from "@/lib/pexels";
-import { storeArticle, storeArticles, getAllArticles, setupArticleApi } from "@/api/articleApi";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
@@ -25,19 +27,73 @@ function IndexContent() {
     total: 0,
     stage: "" as "topics" | "titles" | "articles" | "",
   });
+  const [settings, setSettings] = useState({
+    articlesPerTopic: 5,
+    imagesPerArticle: 1
+  });
 
   // Reference to continue generation
   const generationRef = useRef<boolean>(false);
-
-  // Initialize the article API for external access
-  useEffect(() => {
-    setupArticleApi();
-  }, []);
 
   // Effect to monitor continuous generation state
   useEffect(() => {
     generationRef.current = continuousGeneration;
   }, [continuousGeneration]);
+
+  // Load existing articles from Supabase on mount
+  useEffect(() => {
+    const loadArticles = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('articles')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          // Convert to our Article type
+          const loadedArticles: Article[] = data.map(item => ({
+            id: item.id,
+            title: item.title,
+            content: item.content,
+            topicId: item.topic_id,
+            titleId: crypto.randomUUID(), // Generate a new ID since we don't store this
+            imageUrl: item.image_url,
+            createdAt: new Date(item.created_at)
+          }));
+          
+          setArticles(loadedArticles);
+          
+          // Extract unique topics from articles
+          const uniqueTopics = Array.from(new Set(loadedArticles.map(article => article.topicId)))
+            .map(topicId => {
+              const article = loadedArticles.find(a => a.topicId === topicId);
+              const topicName = article?.title.split(" ").slice(0, 3).join(" ") || "Unknown Topic";
+              
+              return {
+                id: topicId,
+                name: topicName,
+                isUserGenerated: true
+              };
+            });
+          
+          setTopics(prev => {
+            const newTopics = uniqueTopics.filter(
+              newTopic => !prev.some(existingTopic => existingTopic.id === newTopic.id)
+            );
+            return [...prev, ...newTopics];
+          });
+        }
+      } catch (error) {
+        console.error("Error loading articles:", error);
+      }
+    };
+    
+    if (isApiKeysSet) {
+      loadArticles();
+    }
+  }, [isApiKeysSet]);
 
   const handleTopicSubmit = async (topicNames: string[]) => {
     if (!isApiKeysSet || !apiKeys) {
@@ -87,7 +143,10 @@ function IndexContent() {
         
         const result = await geminiService.generateTitles(topic.name);
         
-        return result.titles.map((title) => ({
+        // Limit titles based on settings
+        const limitedTitles = result.titles.slice(0, settings.articlesPerTopic);
+        
+        return limitedTitles.map((title) => ({
           id: crypto.randomUUID(),
           title,
           topicId: topic.id,
@@ -117,10 +176,20 @@ function IndexContent() {
         // Get article content
         const result = await geminiService.generateArticle(title.title, topic.name);
         
-        // Get image if Pexels API is available
+        // Get images if Pexels API is available
         let imageUrl: string | undefined;
-        if (pexelsService) {
-          imageUrl = await pexelsService.searchImages(`${topic.name} ${title.title}`);
+        let additionalImages: string[] = [];
+        
+        if (pexelsService && settings.imagesPerArticle > 0) {
+          const images = await pexelsService.searchImages(
+            `${topic.name} ${title.title}`, 
+            settings.imagesPerArticle
+          );
+          
+          if (images && images.length > 0) {
+            imageUrl = images[0]; // Primary image
+            additionalImages = images.slice(1); // Additional images
+          }
         }
         
         const article: Article = {
@@ -130,6 +199,7 @@ function IndexContent() {
           topicId: topic.id,
           titleId: title.id,
           imageUrl,
+          additionalImages, // Store additional images
           createdAt: new Date(),
         };
         
@@ -137,7 +207,18 @@ function IndexContent() {
         
         // Update articles in real-time to show progress
         setArticles(prev => [...prev, article]);
-        storeArticle(article);
+        
+        // Store the article in Supabase
+        await supabase
+          .from('articles')
+          .insert({
+            id: article.id,
+            title: article.title,
+            content: article.content,
+            topic_id: article.topicId,
+            image_url: article.imageUrl,
+            created_at: article.createdAt.toISOString()
+          });
       }
       
       // Step 3: Generate related topics
@@ -208,6 +289,10 @@ function IndexContent() {
     toast.info("Stopping generation after current batch completes...");
   };
 
+  const handleSettingsChange = (newSettings: { articlesPerTopic: number; imagesPerArticle: number }) => {
+    setSettings(newSettings);
+  };
+
   const renderProgressBar = () => {
     if (!isGenerating || progress.total === 0) return null;
     
@@ -268,44 +353,51 @@ function IndexContent() {
         </p>
       </div>
       
-      <div className="space-y-6">
-        <TopicInput onSubmit={handleTopicSubmit} isGenerating={isGenerating} />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div className="lg:col-span-2 space-y-6">
+          <TopicInput onSubmit={handleTopicSubmit} isGenerating={isGenerating} />
+          
+          {renderProgressBar()}
+          
+          {topics.length > 0 && (
+            <RelatedTopics 
+              topics={topics} 
+              onSelectTopic={handleSelectTopic} 
+              selectedTopics={selectedTopics}
+              isGenerating={isGenerating}
+            />
+          )}
+          
+          {selectedTopics.length > 0 && !isGenerating && (
+            <div className="flex justify-center mt-4 gap-3">
+              <Button 
+                onClick={handleGenerateMore}
+                className="bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                Generate Articles
+              </Button>
+            </div>
+          )}
+          
+          {isGenerating && continuousGeneration && (
+            <div className="flex justify-center mt-4">
+              <Button 
+                onClick={handleStopGeneration}
+                variant="destructive"
+              >
+                Stop Automatic Generation
+              </Button>
+            </div>
+          )}
+        </div>
         
-        {renderProgressBar()}
-        
-        {topics.length > 0 && (
-          <RelatedTopics 
-            topics={topics} 
-            onSelectTopic={handleSelectTopic} 
-            selectedTopics={selectedTopics}
-            isGenerating={isGenerating}
-          />
-        )}
-        
-        {selectedTopics.length > 0 && !isGenerating && (
-          <div className="flex justify-center mt-4 gap-3">
-            <Button 
-              onClick={handleGenerateMore}
-              className="bg-accent hover:bg-accent/90 text-accent-foreground"
-            >
-              Generate Articles
-            </Button>
-          </div>
-        )}
-        
-        {isGenerating && continuousGeneration && (
-          <div className="flex justify-center mt-4">
-            <Button 
-              onClick={handleStopGeneration}
-              variant="destructive"
-            >
-              Stop Automatic Generation
-            </Button>
-          </div>
-        )}
-        
-        <ArticleList articles={articles} topics={topics} />
+        <div className="space-y-6">
+          <GenerationSettings onSettingsChange={handleSettingsChange} />
+          <ApiKeyManager />
+        </div>
       </div>
+      
+      <ArticleList articles={articles} topics={topics} />
     </div>
   );
 }

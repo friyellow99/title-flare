@@ -9,13 +9,13 @@ export class PexelsService {
     this.apiKey = apiKeys.pexelsApiKey || null;
   }
 
-  async searchImages(query: string): Promise<string | undefined> {
+  async searchImages(query: string, count: number = 1): Promise<string[] | undefined> {
     if (!this.apiKey) {
       return undefined;
     }
 
     try {
-      const response = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1`, {
+      const response = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${count}`, {
         headers: {
           Authorization: this.apiKey,
         },
@@ -29,8 +29,8 @@ export class PexelsService {
       const data: PexelsSearchResponse = await response.json();
       
       if (data.photos && data.photos.length > 0) {
-        // Return the medium sized image which is better for article previews
-        return data.photos[0].src.medium;
+        // Return an array of medium sized images
+        return data.photos.map(photo => photo.src.medium);
       }
       
       return undefined;

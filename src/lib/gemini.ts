@@ -64,7 +64,7 @@ export class GeminiService {
   private async makeRequest<T>(prompt: string): Promise<T> {
     return geminiQueue.enqueue(async () => {
       try {
-        // Updated to use Gemini 2.0 Flash Lite model
+        // Use Gemini 2.0 Flash Lite model
         const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash-lite:generateContent?key=${this.apiKey}`, {
           method: "POST",
           headers: {
@@ -141,8 +141,9 @@ export class GeminiService {
           );
           return { topics } as unknown as T;
         } else {
-          // Assume it's an article content
-          return { article: text.trim() } as unknown as T;
+          // Format article content for proper HTML rendering
+          const formattedContent = this.formatArticleContent(text.trim());
+          return { article: formattedContent } as unknown as T;
         }
       }
     } catch (error) {
@@ -150,6 +151,51 @@ export class GeminiService {
       console.log("Original text:", text);
       throw new Error("Failed to parse Gemini API response");
     }
+  }
+
+  // New method to format article content for proper HTML rendering
+  private formatArticleContent(content: string): string {
+    // Replace Markdown headings with HTML headings
+    let formatted = content
+      // Format headers - replace Markdown headers with HTML tags
+      .replace(/^# (.*?)$/gm, '<h1 class="text-3xl font-bold my-4">$1</h1>')
+      .replace(/^## (.*?)$/gm, '<h2 class="text-2xl font-bold my-3">$1</h2>')
+      .replace(/^### (.*?)$/gm, '<h3 class="text-xl font-bold my-2">$1</h3>')
+      .replace(/^#### (.*?)$/gm, '<h4 class="text-lg font-bold my-2">$1</h4>')
+      
+      // Format bold text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/__(.*?)__/g, '<strong>$1</strong>')
+      
+      // Format italic text
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/_(.*?)_/g, '<em>$1</em>')
+      
+      // Format lists
+      .replace(/^- (.*?)$/gm, '<li>$1</li>')
+      .replace(/^\d+\. (.*?)$/gm, '<li>$1</li>')
+      
+      // Wrap paragraphs
+      .replace(/(?<!<\/h[1-6]>|<\/li>|<\/p>)\n\n(?!<h[1-6]|<li|<p)/g, '</p><p class="my-2">');
+    
+    // Ensure the content starts with a paragraph tag if it doesn't already start with an HTML tag
+    if (!formatted.trimStart().startsWith('<')) {
+      formatted = '<p class="my-2">' + formatted;
+    }
+    
+    // Ensure the content ends with a closing paragraph tag if it doesn't already end with an HTML tag
+    if (!formatted.trimEnd().endsWith('>')) {
+      formatted = formatted + '</p>';
+    }
+    
+    // Detect and wrap unordered lists
+    formatted = formatted.replace(/(<li>.*?<\/li>\n?)+/gs, '<ul class="list-disc pl-5 my-3">$&</ul>');
+    
+    // Fix any double-wrapped paragraphs
+    formatted = formatted.replace(/<p class="my-2"><p class="my-2">/g, '<p class="my-2">');
+    formatted = formatted.replace(/<\/p><\/p>/g, '</p>');
+    
+    return formatted;
   }
 
   async generateTitles(topic: string): Promise<GeminiTitleResponse> {
@@ -172,12 +218,18 @@ export class GeminiService {
     const prompt = `Write a comprehensive, informative article with the title "${title}" related to the topic "${topic}".
     
     The article should:
-    - Be well-structured with proper headings and paragraphs
+    - Be well-structured with proper headings (using # for main heading, ## for subheadings)
+    - Use **bold text** for emphasis on important points
     - Be informative and fact-based
     - Be approximately 800-1000 words
     - Include an introduction, main body with 3-5 sections, and a conclusion
     - Use an engaging, professional tone
     - Cite sources if applicable
+    
+    Format the article using Markdown syntax:
+    # Main Heading
+    ## Subheading
+    **Bold text**
     
     Return only the article content without any preamble or explanations.`;
 

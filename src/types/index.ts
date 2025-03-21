@@ -23,6 +23,7 @@ export interface Article {
   topicId: string;
   titleId: string;
   imageUrl?: string;
+  additionalImages?: string[];
   createdAt: Date;
 }
 
@@ -67,4 +68,9 @@ export interface PexelsSearchResponse {
   per_page: number;
   photos: PexelsImage[];
   next_page: string;
+}
+
+export interface AppSettings {
+  articlesPerTopic: number;
+  imagesPerArticle: number;
 }

@@ -18,8 +18,12 @@ export function ArticleCard({ article }: ArticleCardProps) {
   };
 
   const copyToClipboard = () => {
-    const content = `# ${article.title}\n\n${article.content}`;
-    navigator.clipboard.writeText(content).then(
+    // Extract plain text from HTML content for copying
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = article.content;
+    const plainText = `# ${article.title}\n\n${tempDiv.textContent || tempDiv.innerText || article.content}`;
+    
+    navigator.clipboard.writeText(plainText).then(
       () => {
         toast.success("Article copied to clipboard");
       },
@@ -30,11 +34,21 @@ export function ArticleCard({ article }: ArticleCardProps) {
     );
   };
 
-  // Format preview by showing first few paragraphs
-  const contentPreview = article.content
-    .split('\n')
-    .slice(0, 2)
-    .join('\n');
+  // Get the first paragraph of HTML content for preview
+  const getContentPreview = () => {
+    const div = document.createElement('div');
+    div.innerHTML = article.content;
+    
+    // Get first two paragraphs or first heading + first paragraph
+    let preview = '';
+    const elements = div.querySelectorAll('p, h1, h2, h3, h4, h5, h6');
+    
+    for (let i = 0; i < Math.min(2, elements.length); i++) {
+      preview += elements[i].outerHTML;
+    }
+    
+    return preview || article.content.substring(0, 200) + '...';
+  };
 
   return (
     <Card className="w-full overflow-hidden transition-all duration-300 hover:shadow-md animate-slide-up border border-border/40 backdrop-blur-xs bg-card/80">
@@ -61,11 +75,14 @@ export function ArticleCard({ article }: ArticleCardProps) {
       </CardHeader>
       
       <CardContent>
-        <div className={`article-content ${showFullContent ? '' : 'line-clamp-4'}`}>
+        <div className={`article-content ${showFullContent ? '' : 'max-h-36 overflow-hidden'}`}>
           {showFullContent 
-            ? <div dangerouslySetInnerHTML={{ __html: article.content.replace(/\n/g, '<br />') }} />
-            : <div dangerouslySetInnerHTML={{ __html: contentPreview.replace(/\n/g, '<br />') }} />}
+            ? <div dangerouslySetInnerHTML={{ __html: article.content }} />
+            : <div dangerouslySetInnerHTML={{ __html: getContentPreview() }} />}
         </div>
+        {!showFullContent && (
+          <div className="h-8 bg-gradient-to-t from-card to-transparent mt-[-32px] relative"></div>
+        )}
       </CardContent>
       
       <CardFooter className="flex justify-between pt-2">

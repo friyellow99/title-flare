@@ -1,91 +1,179 @@
 
 import { Article } from "@/types";
+import { supabase } from "@/integrations/supabase/client";
 
-// In-memory store for articles
-let articles: Article[] = [];
-
-// API to store articles
-export const storeArticle = (article: Article): void => {
-  articles.push(article);
+// API to store article
+export const storeArticle = async (article: Article): Promise<void> => {
+  await supabase
+    .from('articles')
+    .insert({
+      id: article.id,
+      title: article.title,
+      content: article.content,
+      topic_id: article.topicId,
+      image_url: article.imageUrl,
+      created_at: article.createdAt.toISOString()
+    });
 };
 
 // API to bulk store articles
-export const storeArticles = (newArticles: Article[]): void => {
-  articles = [...articles, ...newArticles];
+export const storeArticles = async (newArticles: Article[]): Promise<void> => {
+  const formattedArticles = newArticles.map(article => ({
+    id: article.id,
+    title: article.title,
+    content: article.content,
+    topic_id: article.topicId,
+    image_url: article.imageUrl,
+    created_at: article.createdAt.toISOString()
+  }));
+  
+  await supabase
+    .from('articles')
+    .insert(formattedArticles);
 };
 
 // API to get all articles
-export const getAllArticles = (): Article[] => {
-  return [...articles];
+export const getAllArticles = async (): Promise<Article[]> => {
+  const { data, error } = await supabase
+    .from('articles')
+    .select('*')
+    .order('created_at', { ascending: false });
+    
+  if (error) throw error;
+  
+  return (data || []).map(item => ({
+    id: item.id,
+    title: item.title,
+    content: item.content,
+    topicId: item.topic_id,
+    titleId: item.id, // Use the same ID as article ID
+    imageUrl: item.image_url,
+    createdAt: new Date(item.created_at)
+  }));
 };
 
 // API to get articles by topic
-export const getArticlesByTopic = (topicId: string): Article[] => {
-  return articles.filter(article => article.topicId === topicId);
+export const getArticlesByTopic = async (topicId: string): Promise<Article[]> => {
+  const { data, error } = await supabase
+    .from('articles')
+    .select('*')
+    .eq('topic_id', topicId)
+    .order('created_at', { ascending: false });
+    
+  if (error) throw error;
+  
+  return (data || []).map(item => ({
+    id: item.id,
+    title: item.title,
+    content: item.content,
+    topicId: item.topic_id,
+    titleId: item.id, // Use the same ID as article ID
+    imageUrl: item.image_url,
+    createdAt: new Date(item.created_at)
+  }));
 };
 
 // API to get single article
-export const getArticleById = (id: string): Article | undefined => {
-  return articles.find(article => article.id === id);
-};
-
-// Clear all articles
-export const clearArticles = (): void => {
-  articles = [];
-};
-
-// Express API endpoint simulation for external access
-export const setupArticleApi = () => {
-  // This would normally be set up with Express, but for this frontend-only app
-  // we'll simulate an API endpoint that could be accessed with proper CORS headers
-  if (window) {
-    (window as any).articleApi = {
-      getAllArticles,
-      getArticlesByTopic,
-      getArticleById,
-    };
+export const getArticleById = async (id: string): Promise<Article | null> => {
+  const { data, error } = await supabase
+    .from('articles')
+    .select('*')
+    .eq('id', id)
+    .single();
     
-    console.info('Article API endpoints available at window.articleApi');
-    console.info('Example usage:');
-    console.info('- window.articleApi.getAllArticles()');
-    console.info('- window.articleApi.getArticlesByTopic(topicId)');
-    console.info('- window.articleApi.getArticleById(articleId)');
-  }
+  if (error) return null;
+  
+  return {
+    id: data.id,
+    title: data.title,
+    content: data.content,
+    topicId: data.topic_id,
+    titleId: data.id, // Use the same ID as article ID
+    imageUrl: data.image_url,
+    createdAt: new Date(data.created_at)
+  };
 };
 
-// This would be used for a real API implementation with proper routes
+// Generate a new API key
+export const generateApiKey = async (description: string): Promise<string | null> => {
+  const key = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+    
+  const { error } = await supabase
+    .from('api_keys')
+    .insert({ key, description: description || 'API Key' });
+    
+  if (error) return null;
+  return key;
+};
+
+// Get API documentation
 export const getApiInstructions = (): string => {
   return `
 # Article Generator API
 
+## Authentication
+
+All API requests require an API key sent in the \`X-API-Key\` header.
+
 ## Endpoints
 
-### GET /api/articles
-Returns all generated articles
+### GET /articles
 
-### GET /api/articles/topic/:topicId
-Returns all articles for a specific topic
+Returns all generated articles.
 
-### GET /api/articles/:id
-Returns a specific article by ID
+#### Query Parameters:
+- \`topic_id\` (optional): Filter articles by topic ID
+- \`limit\` (optional): Limit number of results (default: 10)
 
-## Example usage with fetch
-
-\`\`\`javascript
-// Get all articles
-fetch('/api/articles')
-  .then(response => response.json())
-  .then(data => console.log(data));
-
-// Get articles by topic
-fetch('/api/articles/topic/123')
-  .then(response => response.json())
-  .then(data => console.log(data));
-
-// Get specific article
-fetch('/api/articles/456')
-  .then(response => response.json())
-  .then(data => console.log(data));
+#### Example Request:
 \`\`\`
+curl -X GET "https://${window.location.hostname}/articles" \\
+  -H "X-API-Key: your_api_key"
+\`\`\`
+
+#### Example Response:
+\`\`\`json
+{
+  "articles": [
+    {
+      "id": "uuid",
+      "title": "Article Title",
+      "content": "Article content with HTML formatting",
+      "topic_id": "topic-uuid",
+      "image_url": "https://example.com/image.jpg",
+      "created_at": "2023-07-25T15:30:00.000Z"
+    }
+  ]
+}
+\`\`\`
+
+### GET /articles?topic_id=123
+
+Returns articles for a specific topic.
+
+#### Example Request:
+\`\`\`
+curl -X GET "https://${window.location.hostname}/articles?topic_id=123" \\
+  -H "X-API-Key: your_api_key"
+\`\`\`
+
+## Error Responses
+
+\`\`\`json
+{
+  "error": "Error message"
+}
+\`\`\`
+
+Common error codes:
+- 401: Missing or invalid API key
+- 500: Server error
   `;
+};
+
+// Setup function is no longer needed as we're using Supabase directly
+export const setupArticleApi = (): void => {
+  console.info('Article API endpoints are now handled by Supabase Edge Functions');
 };
