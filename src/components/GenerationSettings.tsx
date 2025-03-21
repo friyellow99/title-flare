@@ -1,10 +1,15 @@
-
 import { useState, useEffect } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+
+// Define the shape of our settings
+interface GenerationSettings {
+  articles_per_topic: number;
+  images_per_article: number;
+}
 
 interface GenerationSettingsProps {
   onSettingsChange: (settings: { articlesPerTopic: number; imagesPerArticle: number }) => void;
@@ -26,13 +31,18 @@ export function GenerationSettings({ onSettingsChange }: GenerationSettingsProps
           .single();
 
         if (error) throw error;
-        
-        if (data && data.value) {
-          setArticlesPerTopic(data.value.articles_per_topic || 5);
-          setImagesPerArticle(data.value.images_per_article || 1);
+
+        // Type check and safely access the properties
+        if (data && data.value && typeof data.value === 'object') {
+          const settings = data.value as GenerationSettings;
+          const articles = settings.articles_per_topic ?? 5;
+          const images = settings.images_per_article ?? 1;
+          
+          setArticlesPerTopic(articles);
+          setImagesPerArticle(images);
           onSettingsChange({
-            articlesPerTopic: data.value.articles_per_topic || 5,
-            imagesPerArticle: data.value.images_per_article || 1
+            articlesPerTopic: articles,
+            imagesPerArticle: images
           });
         }
       } catch (error) {
@@ -49,10 +59,13 @@ export function GenerationSettings({ onSettingsChange }: GenerationSettingsProps
     try {
       const { error } = await supabase
         .from('app_settings')
-        .update({
-          value: { articles_per_topic: articlesPerTopic, images_per_article: imagesPerArticle }
-        })
-        .eq('key', 'generation_defaults');
+        .upsert({
+          key: 'generation_defaults',
+          value: { 
+            articles_per_topic: articlesPerTopic, 
+            images_per_article: imagesPerArticle 
+          }
+        });
 
       if (error) throw error;
       toast.success('Settings saved');
