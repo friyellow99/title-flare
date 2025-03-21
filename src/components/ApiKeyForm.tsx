@@ -49,7 +49,7 @@ export function ApiKeyForm() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="gemini-api-key" className="text-sm font-medium">
-              Gemini 1.5 Flash API Key <span className="text-red-500">*</span>
+              Gemini 2.0 Flash Lite API Key <span className="text-red-500">*</span>
             </Label>
             <Input
               id="gemini-api-key"
