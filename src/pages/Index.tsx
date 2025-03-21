@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ApiProvider, useApi } from "@/context/ApiContext";
 import { ApiKeyForm } from "@/components/ApiKeyForm";
 import { TopicInput } from "@/components/TopicInput";
@@ -19,16 +19,25 @@ function IndexContent() {
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [continuousGeneration, setContinuousGeneration] = useState(false);
   const [progress, setProgress] = useState({
     current: 0,
     total: 0,
     stage: "" as "topics" | "titles" | "articles" | "",
   });
 
+  // Reference to continue generation
+  const generationRef = useRef<boolean>(false);
+
   // Initialize the article API for external access
   useEffect(() => {
     setupArticleApi();
   }, []);
+
+  // Effect to monitor continuous generation state
+  useEffect(() => {
+    generationRef.current = continuousGeneration;
+  }, [continuousGeneration]);
 
   const handleTopicSubmit = async (topicNames: string[]) => {
     if (!isApiKeysSet || !apiKeys) {
@@ -36,6 +45,9 @@ function IndexContent() {
       return;
     }
 
+    // Reset previous state when submitting new topics
+    setContinuousGeneration(true);
+    
     // Create topic objects
     const newTopics = topicNames.map((name) => ({
       id: crypto.randomUUID(),
@@ -64,6 +76,9 @@ function IndexContent() {
     try {
       // Step 1: Generate titles for each topic
       const allTitlesPromises = topicsToProcess.map(async (topic, index) => {
+        // Check if generation should continue
+        if (!generationRef.current) throw new Error("Generation stopped by user");
+        
         setProgress({ 
           current: index + 1, 
           total: topicsToProcess.length, 
@@ -89,6 +104,9 @@ function IndexContent() {
       const newArticles: Article[] = [];
       
       for (let i = 0; i < allTitles.length; i++) {
+        // Check if generation should continue
+        if (!generationRef.current) throw new Error("Generation stopped by user");
+        
         const title = allTitles[i];
         const topic = topicsToProcess.find((t) => t.id === title.topicId);
         
@@ -116,33 +134,51 @@ function IndexContent() {
         };
         
         newArticles.push(article);
+        
+        // Update articles in real-time to show progress
+        setArticles(prev => [...prev, article]);
+        storeArticle(article);
       }
       
       // Step 3: Generate related topics
-      const relatedTopicsPromises = topicsToProcess.map(async (topic) => {
-        const result = await geminiService.generateRelatedTopics(topic.name);
+      if (generationRef.current) {
+        const relatedTopicsPromises = topicsToProcess.map(async (topic) => {
+          if (!generationRef.current) throw new Error("Generation stopped by user");
+          const result = await geminiService.generateRelatedTopics(topic.name);
+          
+          return result.topics.map((topicName) => ({
+            id: crypto.randomUUID(),
+            name: topicName,
+            isUserGenerated: false,
+          }));
+        });
         
-        return result.topics.map((topicName) => ({
-          id: crypto.randomUUID(),
-          name: topicName,
-          isUserGenerated: false,
-        }));
-      });
-      
-      const relatedTopicsArrays = await Promise.all(relatedTopicsPromises);
-      const relatedTopics = relatedTopicsArrays.flat();
-      
-      // Update state with all the new data
-      setTopics((prev) => [...prev, ...relatedTopics]);
-      setArticles((prev) => [...prev, ...newArticles]);
-      
-      // Store in "API"
-      storeArticles(newArticles);
-      
-      toast.success(`Successfully generated ${newArticles.length} articles`);
+        const relatedTopicsArrays = await Promise.all(relatedTopicsPromises);
+        const relatedTopics = relatedTopicsArrays.flat();
+        
+        // Update state with new related topics
+        setTopics((prev) => [...prev, ...relatedTopics]);
+        
+        toast.success(`Successfully generated ${newArticles.length} articles`);
+        
+        // Continue with the next generation cycle if continuous generation is enabled
+        if (generationRef.current) {
+          setSelectedTopics(relatedTopics);
+          // Short delay to avoid hammering the API too much
+          setTimeout(() => {
+            if (generationRef.current) {
+              generateContent(relatedTopics);
+            }
+          }, 2000);
+        }
+      }
     } catch (error) {
-      console.error("Error generating content:", error);
-      toast.error("Error generating content: " + (error instanceof Error ? error.message : "Unknown error"));
+      if ((error as Error).message === "Generation stopped by user") {
+        toast.info("Content generation was stopped by user");
+      } else {
+        console.error("Error generating content:", error);
+        toast.error("Error generating content: " + (error instanceof Error ? error.message : "Unknown error"));
+      }
     } finally {
       setIsGenerating(false);
       setProgress({ current: 0, total: 0, stage: "" });
@@ -163,7 +199,13 @@ function IndexContent() {
       return;
     }
     
+    setContinuousGeneration(true);
     generateContent(selectedTopics);
+  };
+
+  const handleStopGeneration = () => {
+    setContinuousGeneration(false);
+    toast.info("Stopping generation after current batch completes...");
   };
 
   const renderProgressBar = () => {
@@ -208,7 +250,7 @@ function IndexContent() {
         <div className="text-center mb-12 space-y-3">
           <h1 className="text-4xl font-bold tracking-tight">AI Article Generator</h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Generate high-quality articles automatically with the power of Gemini AI
+            Generate high-quality articles automatically with the power of Gemini 2.0 Flash Lite
           </p>
         </div>
         
@@ -222,7 +264,7 @@ function IndexContent() {
       <div className="text-center mb-8 space-y-3">
         <h1 className="text-4xl font-bold tracking-tight">AI Article Generator</h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Generate high-quality articles automatically with the power of Gemini AI
+          Generate high-quality articles automatically with the power of Gemini 2.0 Flash Lite
         </p>
       </div>
       
@@ -241,12 +283,23 @@ function IndexContent() {
         )}
         
         {selectedTopics.length > 0 && !isGenerating && (
-          <div className="flex justify-center mt-4">
+          <div className="flex justify-center mt-4 gap-3">
             <Button 
               onClick={handleGenerateMore}
               className="bg-accent hover:bg-accent/90 text-accent-foreground"
             >
-              Generate More Articles
+              Generate Articles
+            </Button>
+          </div>
+        )}
+        
+        {isGenerating && continuousGeneration && (
+          <div className="flex justify-center mt-4">
+            <Button 
+              onClick={handleStopGeneration}
+              variant="destructive"
+            >
+              Stop Automatic Generation
             </Button>
           </div>
         )}

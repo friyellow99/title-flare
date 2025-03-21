@@ -29,7 +29,7 @@ export class PexelsService {
       const data: PexelsSearchResponse = await response.json();
       
       if (data.photos && data.photos.length > 0) {
-        // Return the medium sized image
+        // Return the medium sized image which is better for article previews
         return data.photos[0].src.medium;
       }
       

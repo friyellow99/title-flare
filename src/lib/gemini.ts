@@ -61,10 +61,11 @@ export class GeminiService {
     this.apiKey = apiKeys.geminiApiKey;
   }
 
-  private async makeRequest<T>(prompt: string, model = "gemini-pro"): Promise<T> {
+  private async makeRequest<T>(prompt: string): Promise<T> {
     return geminiQueue.enqueue(async () => {
       try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`, {
+        // Updated to use Gemini 2.0 Flash Lite model
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=${this.apiKey}`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
